@@ -1,0 +1,206 @@
+package repository_test
+
+import (
+	"fmt"
+	"os"
+	"testing"
+
+	"github.com/buylist-manager/backend/internal/models"
+	"github.com/buylist-manager/backend/internal/repository"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+// setupTestDB creates a PostgreSQL test database connection
+func setupTestDB(t *testing.T) *gorm.DB {
+	// Use environment variables or defaults for test database
+	host := getEnv("DB_HOST", "localhost")
+	port := getEnv("DB_PORT", "5432")
+	user := getEnv("DB_USER", "devuser")
+	password := getEnv("DB_PASSWORD", "")
+	dbname := "buylist_test" // Use pre-created test database
+
+	// Connection string (without password if empty)
+	var dsn string
+	if password != "" {
+		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+			host, user, password, dbname, port)
+	} else {
+		dsn = fmt.Sprintf("host=%s user=%s dbname=%s port=%s sslmode=disable",
+			host, user, dbname, port)
+	}
+
+	// Connect to test database
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Skipf("Skipping test: PostgreSQL not available: %v", err)
+		return nil
+	}
+
+	// Run migrations
+	err = db.AutoMigrate(&models.Category{}, &models.Subcategory{}, &models.Product{})
+	require.NoError(t, err, "Failed to run migrations")
+
+	// Clean up all data before each test
+	db.Exec("TRUNCATE TABLE products, subcategories, categories RESTART IDENTITY CASCADE")
+
+	// Cleanup function
+	t.Cleanup(func() {
+		// Clean up after test
+		db.Exec("TRUNCATE TABLE products, subcategories, categories RESTART IDENTITY CASCADE")
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	})
+
+	return db
+}
+
+// getEnv gets an environment variable with a fallback default value
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+// TestCategoryRepository_Create tests creating a new category
+func TestCategoryRepository_Create(t *testing.T) {
+	// ARRANGE: Setup test database and repository
+	db := setupTestDB(t)
+	repo := repository.NewCategoryRepository(db)
+
+	category := &models.Category{
+		Name: "Compra Única",
+		Type: "one_time",
+	}
+
+	// ACT: Create the category
+	err := repo.Create(category)
+
+	// ASSERT: Check that it was created successfully
+	require.NoError(t, err, "Expected no error when creating category")
+	assert.NotZero(t, category.ID, "Expected category ID to be set after creation")
+	assert.Equal(t, "Compra Única", category.Name)
+	assert.Equal(t, "one_time", category.Type)
+}
+
+// TestCategoryRepository_FindByID tests finding a category by ID
+func TestCategoryRepository_FindByID(t *testing.T) {
+	// ARRANGE
+	db := setupTestDB(t)
+	repo := repository.NewCategoryRepository(db)
+
+	// Create a category first
+	original := &models.Category{
+		Name: "Test Category",
+		Type: "recurring",
+	}
+	err := repo.Create(original)
+	require.NoError(t, err)
+
+	// ACT: Find the category by ID
+	found, err := repo.FindByID(original.ID)
+
+	// ASSERT
+	require.NoError(t, err)
+	assert.NotNil(t, found)
+	assert.Equal(t, original.ID, found.ID)
+	assert.Equal(t, original.Name, found.Name)
+	assert.Equal(t, original.Type, found.Type)
+}
+
+// TestCategoryRepository_FindByID_NotFound tests when a category doesn't exist
+func TestCategoryRepository_FindByID_NotFound(t *testing.T) {
+	// ARRANGE
+	db := setupTestDB(t)
+	repo := repository.NewCategoryRepository(db)
+
+	// ACT: Try to find a non-existent category
+	found, err := repo.FindByID(9999)
+
+	// ASSERT
+	assert.Error(t, err, "Expected error when category not found")
+	assert.Nil(t, found, "Expected nil category when not found")
+}
+
+// TestCategoryRepository_FindAll tests retrieving all categories
+func TestCategoryRepository_FindAll(t *testing.T) {
+	// ARRANGE
+	db := setupTestDB(t)
+	repo := repository.NewCategoryRepository(db)
+
+	// Create multiple categories
+	categories := []*models.Category{
+		{Name: "Category 1", Type: "one_time"},
+		{Name: "Category 2", Type: "recurring"},
+		{Name: "Category 3", Type: "one_time"},
+	}
+
+	for _, cat := range categories {
+		err := repo.Create(cat)
+		require.NoError(t, err)
+	}
+
+	// ACT
+	allCategories, err := repo.FindAll()
+
+	// ASSERT
+	require.NoError(t, err)
+	assert.Len(t, allCategories, 3, "Expected 3 categories")
+}
+
+// TestCategoryRepository_Update tests updating a category
+func TestCategoryRepository_Update(t *testing.T) {
+	// ARRANGE
+	db := setupTestDB(t)
+	repo := repository.NewCategoryRepository(db)
+
+	category := &models.Category{
+		Name: "Original Name",
+		Type: "one_time",
+	}
+	err := repo.Create(category)
+	require.NoError(t, err)
+
+	// ACT: Update the category
+	category.Name = "Updated Name"
+	category.Type = "recurring"
+	err = repo.Update(category)
+
+	// ASSERT
+	require.NoError(t, err)
+
+	// Verify the update by fetching again
+	updated, err := repo.FindByID(category.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Name", updated.Name)
+	assert.Equal(t, "recurring", updated.Type)
+}
+
+// TestCategoryRepository_Delete tests deleting a category
+func TestCategoryRepository_Delete(t *testing.T) {
+	// ARRANGE
+	db := setupTestDB(t)
+	repo := repository.NewCategoryRepository(db)
+
+	category := &models.Category{
+		Name: "To Delete",
+		Type: "one_time",
+	}
+	err := repo.Create(category)
+	require.NoError(t, err)
+
+	// ACT: Delete the category
+	err = repo.Delete(category.ID)
+
+	// ASSERT
+	require.NoError(t, err)
+
+	// Verify it's deleted
+	found, err := repo.FindByID(category.ID)
+	assert.Error(t, err)
+	assert.Nil(t, found)
+}

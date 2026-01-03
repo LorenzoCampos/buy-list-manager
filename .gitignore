@@ -1,0 +1,44 @@
+# Backend (Go)
+backend/bin/
+backend/*.exe
+backend/*.dll
+backend/*.so
+backend/*.dylib
+backend/*.test
+backend/*.out
+backend/.env
+
+# Frontend (Node)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.vite/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Session notes (keep for now)
+# session-*.md
+
+# Test coverage
+coverage/
+*.coverprofile
